@@ -19,12 +19,15 @@ package v1beta1
 import (
 	"context"
 	"fmt"
+	"gomodules.xyz/password-generator"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/pkg/errors"
+	_ "gomodules.xyz/password-generator"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -71,7 +74,8 @@ func (mw *azureManagedMachinePoolWebhook) Default(ctx context.Context, obj runti
 	m.Labels[LabelAgentPoolMode] = m.Spec.Mode
 
 	if m.Spec.Name == nil || *m.Spec.Name == "" {
-		m.Spec.Name = &m.Name
+		nodePoolName := generateAKSNodePoolName(m.Name)
+		m.Spec.Name = &nodePoolName
 	}
 
 	if m.Spec.OSType == nil {
@@ -79,6 +83,35 @@ func (mw *azureManagedMachinePoolWebhook) Default(ctx context.Context, obj runti
 	}
 
 	return nil
+}
+
+// generates a valid unqiue nodepool name
+func generateAKSNodePoolName(name string) string {
+	var builder strings.Builder
+
+	for _, char := range name {
+		if builder.Len() == 0 {
+			if unicode.IsLower(char) {
+				builder.WriteRune(char)
+			}
+		} else if unicode.IsLower(char) || unicode.IsNumber(char) {
+			builder.WriteRune(char)
+		}
+
+		if builder.Len() == 6 {
+			break
+		}
+	}
+
+	if builder.Len() == 0 {
+		builder.WriteString("pool")
+	}
+
+	numOfChars := 12 - builder.Len()
+	randomValue := password.GenerateForCharset(numOfChars, password.Lowercase|password.Numbers)
+	builder.WriteString(randomValue)
+
+	return builder.String()
 }
 
 //+kubebuilder:webhook:verbs=create;update;delete,path=/validate-infrastructure-cluster-x-k8s-io-v1beta1-azuremanagedmachinepool,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=azuremanagedmachinepools,versions=v1beta1,name=validation.azuremanagedmachinepools.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
@@ -361,6 +394,35 @@ func (m *AzureManagedMachinePool) validateName() error {
 			field.NewPath("Spec", "Name"),
 			m.Spec.Name,
 			"Windows agent pool name can not be longer than 6 characters.")
+	}
+
+	// Length check for linux
+	if m.Spec.OSType == nil || *m.Spec.OSType == LinuxOS &&
+		m.Spec.Name != nil && len(*m.Spec.Name) > 12 {
+		return field.Invalid(
+			field.NewPath("Spec", "Name"),
+			m.Spec.Name,
+			"Linux agent pool name can not be longer than 12 characters.")
+	}
+
+	// Common Checks for both Windows & Linux
+	if m.Spec.Name != nil {
+		for _, char := range *m.Spec.Name {
+			if !unicode.IsLower(char) && !unicode.IsNumber(char) {
+				return field.Invalid(
+					field.NewPath("Spec", "Name"),
+					m.Spec.Name,
+					"Agent pool name may only contain lowercase alphanumeric characters.")
+			}
+		}
+
+		nodePoolName := *m.Spec.Name
+		if !unicode.IsLower(rune(nodePoolName[0])) {
+			return field.Invalid(
+				field.NewPath("Spec", "Name"),
+				m.Spec.Name,
+				"Linux agent pool name must begin with a lowercase letter.")
+		}
 	}
 
 	return nil

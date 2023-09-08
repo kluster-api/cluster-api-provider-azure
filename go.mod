@@ -36,6 +36,7 @@ require (
 	golang.org/x/crypto v0.11.0
 	golang.org/x/mod v0.12.0
 	golang.org/x/text v0.12.0
+	gomodules.xyz/password-generator v0.2.9
 	k8s.io/api v0.26.2
 	k8s.io/apimachinery v0.26.2
 	k8s.io/client-go v0.26.2
